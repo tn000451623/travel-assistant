@@ -1,0 +1,8 @@
+{
+  "name": "旅遊助手",
+  "description": "專為台灣人設計的旅遊助手，提供語音翻譯、匯率換算與景點探索功能。",
+  "requestFramePermissions": [
+    "geolocation",
+    "microphone"
+  ]
+}
