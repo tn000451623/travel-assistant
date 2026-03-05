@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Calculator, MessageSquare, Wallet, ArrowRightLeft, Info, Trash2, RefreshCw, MapPin, Compass, Navigation, Home, Globe, AlertTriangle, Tag, Mic, Volume2, MicOff } from 'lucide-react';
+import { Calculator, MessageSquare, Wallet, ArrowRightLeft, Info, Trash2, RefreshCw, MapPin, Compass, Navigation, Home, Globe, AlertTriangle, Tag, Mic, Volume2, MicOff, Send, User, Bot, X, MessageCircle } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
@@ -1031,6 +1031,142 @@ function TippingGuide({ tips, exchangeRate, currencyName, themeText, themeBg, co
   );
 }
 
+// --- Chat Modal Component ---
+
+interface Message {
+  role: 'user' | 'bot';
+  text: string;
+}
+
+function ChatModal({ isOpen, onClose }: { isOpen: boolean; onClose: () => void }) {
+  const [messages, setMessages] = useState<Message[]>([
+    { role: 'bot', text: '您好！我是您的旅遊 AI 助手。有任何關於越南、日本、泰國或韓國的旅遊問題都可以問我喔！' }
+  ]);
+  const [input, setInput] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
+  const scrollRef = React.useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (scrollRef.current) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    }
+  }, [messages]);
+
+  const handleSend = async () => {
+    if (!input.trim() || isLoading) return;
+
+    const userMsg = input.trim();
+    setInput('');
+    setMessages(prev => [...prev, { role: 'user', text: userMsg }]);
+    setIsLoading(true);
+
+    try {
+      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+      const response = await ai.models.generateContent({
+        model: "gemini-2.5-flash",
+        contents: userMsg,
+        config: {
+          systemInstruction: "你是一位專業的旅遊助手，擅長回答關於越南、日本、泰國、韓國的旅遊資訊。請用繁體中文回答，語氣親切且專業。如果問題與旅遊無關，請禮貌地引導回旅遊話題。",
+        }
+      });
+
+      const botText = response.text || '抱歉，我現在無法回答這個問題。';
+      setMessages(prev => [...prev, { role: 'bot', text: botText }]);
+    } catch (error) {
+      console.error('AI Error:', error);
+      setMessages(prev => [...prev, { role: 'bot', text: '抱歉，連線發生錯誤，請稍後再試。' }]);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  return (
+    <AnimatePresence>
+      {isOpen && (
+        <motion.div 
+          initial={{ opacity: 0 }} 
+          animate={{ opacity: 1 }} 
+          exit={{ opacity: 0 }}
+          className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4 bg-black/40 backdrop-blur-sm"
+        >
+          <motion.div 
+            initial={{ y: 100, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            exit={{ y: 100, opacity: 0 }}
+            className="bg-white w-full max-w-md h-[80vh] rounded-t-[2.5rem] sm:rounded-[2.5rem] shadow-2xl flex flex-col overflow-hidden"
+          >
+            {/* Header */}
+            <div className="bg-blue-600 p-6 text-white flex items-center justify-between shrink-0">
+              <div className="flex items-center gap-3">
+                <div className="bg-white/20 p-2 rounded-2xl">
+                  <Bot size={24} />
+                </div>
+                <div>
+                  <h3 className="font-bold text-lg">即時問答助手</h3>
+                  <p className="text-blue-100 text-[10px]">Powered by Gemini AI</p>
+                </div>
+              </div>
+              <button onClick={onClose} className="p-2 hover:bg-white/10 rounded-full transition-colors">
+                <X size={24} />
+              </button>
+            </div>
+
+            {/* Messages */}
+            <div ref={scrollRef} className="flex-1 overflow-y-auto p-6 space-y-4 bg-gray-50">
+              {messages.map((msg, i) => (
+                <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                  <div className={`flex gap-2 max-w-[85%] ${msg.role === 'user' ? 'flex-row-reverse' : 'flex-row'}`}>
+                    <div className={`shrink-0 w-8 h-8 rounded-full flex items-center justify-center ${msg.role === 'user' ? 'bg-blue-100 text-blue-600' : 'bg-white text-gray-600 shadow-sm'}`}>
+                      {msg.role === 'user' ? <User size={16} /> : <Bot size={16} />}
+                    </div>
+                    <div className={`p-4 rounded-2xl text-sm leading-relaxed ${msg.role === 'user' ? 'bg-blue-600 text-white rounded-tr-none' : 'bg-white text-gray-700 shadow-sm rounded-tl-none'}`}>
+                      <div className="markdown-body">
+                        <ReactMarkdown>{msg.text}</ReactMarkdown>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ))}
+              {isLoading && (
+                <div className="flex justify-start">
+                  <div className="flex gap-2 items-center bg-white p-4 rounded-2xl shadow-sm rounded-tl-none">
+                    <div className="flex gap-1">
+                      <div className="w-1.5 h-1.5 bg-gray-300 rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></div>
+                      <div className="w-1.5 h-1.5 bg-gray-300 rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></div>
+                      <div className="w-1.5 h-1.5 bg-gray-300 rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></div>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Input */}
+            <div className="p-4 bg-white border-t border-gray-100">
+              <div className="relative flex items-center gap-2">
+                <input 
+                  type="text" 
+                  value={input}
+                  onChange={(e) => setInput(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && handleSend()}
+                  placeholder="輸入您的旅遊問題..."
+                  className="flex-1 bg-gray-100 border-none rounded-2xl px-5 py-3.5 text-sm focus:ring-2 focus:ring-blue-500 transition-all outline-none"
+                />
+                <button 
+                  onClick={handleSend}
+                  disabled={!input.trim() || isLoading}
+                  className={`p-3.5 rounded-2xl transition-all ${!input.trim() || isLoading ? 'bg-gray-100 text-gray-400' : 'bg-blue-600 text-white shadow-lg shadow-blue-200 active:scale-95'}`}
+                >
+                  <Send size={20} />
+                </button>
+              </div>
+            </div>
+          </motion.div>
+        </motion.div>
+      )}
+    </AnimatePresence>
+  );
+}
+
 // --- Main App ---
 
 interface CountryModuleProps {
@@ -1257,6 +1393,7 @@ function HomeModule({ onNavigate }: { onNavigate: (tab: 'vietnam' | 'japan' | 't
 
 export default function App() {
   const [mainTab, setMainTab] = useState<'home' | 'vietnam' | 'japan' | 'thailand' | 'korea'>('home');
+  const [isChatOpen, setIsChatOpen] = useState(false);
 
   return (
     <div className="h-[100dvh] w-full bg-[#F8FAFC] flex flex-col font-sans max-w-md mx-auto shadow-2xl relative overflow-hidden">
@@ -1276,6 +1413,9 @@ export default function App() {
         </AnimatePresence>
       </main>
 
+      {/* Chat Modal */}
+      <ChatModal isOpen={isChatOpen} onClose={() => setIsChatOpen(false)} />
+
       {/* Global Bottom Navigation */}
       <nav className="bg-white border-t border-gray-100 pb-2 pt-1 absolute bottom-0 w-full rounded-t-3xl shadow-[0_-10px_40px_rgba(0,0,0,0.05)] z-20">
         <div className="flex justify-around items-center px-6 py-0.5">
@@ -1289,6 +1429,16 @@ export default function App() {
               <Home size={20} strokeWidth={mainTab === 'home' ? 2.5 : 2} />
             </div>
             <span className="text-[9px] font-bold">首頁</span>
+          </button>
+
+          <button
+            onClick={() => setIsChatOpen(true)}
+            className={`flex flex-col items-center justify-center w-full h-12 rounded-2xl transition-all text-gray-400 hover:text-gray-600`}
+          >
+            <div className={`p-1 rounded-xl mb-0.5`}>
+              <MessageCircle size={20} />
+            </div>
+            <span className="text-[9px] font-bold">即時問答</span>
           </button>
         </div>
       </nav>
