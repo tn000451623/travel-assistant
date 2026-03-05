@@ -1,19 +1,24 @@
 import React, { useState, useEffect } from 'react';
-import { Calculator, MessageSquare, Wallet, Volume2, ArrowRightLeft, Info, Trash2, RefreshCw, MapPin, Compass, Navigation, Home, Globe, AlertTriangle, Tag, Mic, Languages, Play } from 'lucide-react';
+import { Calculator, MessageSquare, Wallet, ArrowRightLeft, Info, Trash2, RefreshCw, MapPin, Compass, Navigation, Home, Globe, AlertTriangle, Tag, Mic, Volume2, MicOff } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
 import ReactMarkdown from 'react-markdown';
 import { GoogleGenAI } from '@google/genai';
-import ttsData from './tts_data.json';
+
+// --- Types ---
+declare global {
+  interface Window {
+    SpeechRecognition: any;
+    webkitSpeechRecognition: any;
+  }
+}
 
 // Fix Leaflet default icon issue
-import icon from 'leaflet/dist/images/marker-icon.png';
-import iconShadow from 'leaflet/dist/images/marker-shadow.png';
-let DefaultIcon = L.icon({
-    iconUrl: icon,
-    shadowUrl: iconShadow,
+const DefaultIcon = L.icon({
+    iconUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png',
+    shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
     iconSize: [25, 41],
     iconAnchor: [12, 41]
 });
@@ -22,20 +27,90 @@ L.Marker.prototype.options.icon = DefaultIcon;
 // --- Constants & Data ---
 const FALLBACK_EXCHANGE_RATE = 780; // 1 TWD = 780 VND (Approximate fallback)
 
-const PHRASES = [
-  { id: 1, category: '餐飲', zh: '不要香菜', vi: 'Không rau mùi', phonetic: '空 饒 姆以' },
-  { id: 2, category: '餐飲', zh: '不要冰塊', vi: 'Không đá', phonetic: '空 答' },
-  { id: 3, category: '餐飲', zh: '少糖', vi: 'Ít đường', phonetic: '伊 登' },
-  { id: 9, category: '購物', zh: '多少錢', vi: 'Bao nhiêu tiền?', phonetic: '包 紐 點' },
-  { id: 4, category: '購物', zh: '太貴了', vi: 'Mắc quá', phonetic: '馬 瓜' },
-  { id: 5, category: '購物', zh: '結帳', vi: 'Tính tiền', phonetic: '丁 點' },
-  { id: 6, category: '日常', zh: '你好', vi: 'Xin chào', phonetic: '新 昭' },
-  { id: 7, category: '日常', zh: '謝謝', vi: 'Cảm ơn', phonetic: '感恩' },
-  { id: 8, category: '交通', zh: '我要去這裡', vi: 'Tôi muốn đến đây', phonetic: '多以 姆翁 點 堆' },
-  { id: 10, category: '日常', zh: '請問廁所在哪裡呢?', vi: 'Xin hỏi nhà vệ sinh ở đâu?', phonetic: '新 害 娘 衛 仙 噁 豆' },
+const PHRASES_TH = [
+  { id: 1, category: '餐飲', zh: '不要辣', target: 'Mai pet', phonetic: '賣 呸' },
+  { id: 2, category: '餐飲', zh: '請給我水', target: 'Kor nam plao', phonetic: '口 囊 拋' },
+  { id: 3, category: '餐飲', zh: '很好吃', target: 'Aroi mak', phonetic: '阿 蕊 罵' },
+  { id: 4, category: '購物', zh: '多少錢', target: 'Tao rai?', phonetic: '套 萊' },
+  { id: 5, category: '購物', zh: '太貴了', target: 'Paeng pai', phonetic: '拼 拜' },
+  { id: 6, category: '日常', zh: '你好', target: 'Sawasdee', phonetic: '三 哇 滴' },
+  { id: 7, category: '日常', zh: '謝謝', target: 'Khob khun', phonetic: '口 坤' },
+  { id: 8, category: '交通', zh: '我要去這裡', target: 'Yark pai tee nee', phonetic: '亞 拜 踢 尼' },
+  { id: 9, category: '日常', zh: '對不起', target: 'Kor thoad', phonetic: '口 投' },
+  { id: 10, category: '日常', zh: '廁所在哪裡？', target: 'Hong nam yoo nai?', phonetic: '紅 囊 幽 奶' },
 ];
 
-const TIPS = [
+const TIPS_TH = [
+  { id: 1, title: '床頭小費', min: 20, max: 50, desc: '每天早上放在枕頭上或床頭櫃', icon: '🛏️' },
+  { id: 2, title: '行李員', min: 20, max: 50, desc: '按件計算，幫忙送到房間時給予', icon: '🧳' },
+  { id: 3, title: '按摩 (一般)', min: 50, max: 100, desc: '60-90分鐘的平價街邊按摩', icon: '💆' },
+  { id: 4, title: '按摩 (高級)', min: 100, max: 200, desc: '高檔SPA或飯店附設按摩', icon: '✨' },
+  { id: 5, title: '包車司機', min: 50, max: 100, desc: '一整天的行程結束後給予', icon: '🚐' },
+  { id: 6, title: '餐廳服務', min: 20, max: null, desc: '非強制，通常會將零頭給服務生', icon: '🍽️' },
+];
+
+const REGIONAL_DATA_TH = {
+  central: {
+    name: '中部 (曼谷)',
+    prices: [
+      { id: 1, name: '泰式炒河粉 (Pad Thai)', min: 50, max: 120, icon: '🍜' },
+      { id: 2, name: '芒果糯米飯', min: 60, max: 150, icon: '🥭' },
+      { id: 3, name: '泰式奶茶', min: 25, max: 60, icon: '🧋' },
+      { id: 4, name: '現剖椰子', min: 40, max: 80, icon: '🥥' },
+      { id: 5, name: '嘟嘟車 (短程)', min: 60, max: 150, icon: '🛺' },
+      { id: 6, name: '平價按摩 (60分鐘)', min: 250, max: 450, icon: '💆' },
+    ],
+    souvenirs: [
+      { id: 101, name: '泰國手標奶茶粉', min: 130, max: 250, icon: '🧋' },
+      { id: 102, name: '鼻通 (Poy-Sian)', min: 20, max: 30, icon: '👃' },
+      { id: 103, name: '曼谷包 (NaRaYa)', min: 150, max: 800, icon: '👜' },
+    ]
+  },
+  north: {
+    name: '北部 (清邁)',
+    prices: [
+      { id: 1, name: '泰北咖哩麵 (Khao Soi)', min: 40, max: 80, icon: '🍜' },
+      { id: 2, name: '夜市小吃', min: 20, max: 100, icon: '🍢' },
+      { id: 3, name: '手沖咖啡', min: 40, max: 120, icon: '☕' },
+      { id: 4, name: '雙條車 (市區)', min: 30, max: 50, icon: '🛻' },
+      { id: 5, name: '租機車 (24h)', min: 200, max: 350, icon: '🛵' },
+      { id: 6, name: '清邁按摩 (60分鐘)', min: 200, max: 350, icon: '💆' },
+    ],
+    souvenirs: [
+      { id: 201, name: '大象褲', min: 100, max: 150, icon: '🐘' },
+      { id: 202, name: '手工皂/香氛', min: 50, max: 300, icon: '🧼' },
+      { id: 203, name: '乾果/堅果', min: 80, max: 250, icon: '🥜' },
+    ]
+  }
+};
+
+const PHRASES_VN = [
+  { id: 1, category: '餐飲', zh: '不要香菜', target: 'Không rau mùi', phonetic: '空 饒 姆以' },
+  { id: 2, category: '餐飲', zh: '不要冰塊', target: 'Không đá', phonetic: '空 答' },
+  { id: 3, category: '餐飲', zh: '少糖', target: 'Ít đường', phonetic: '伊 登' },
+  { id: 9, category: '購物', zh: '多少錢', target: 'Bao nhiêu tiền?', phonetic: '包 紐 點' },
+  { id: 4, category: '購物', zh: '太貴了', target: 'Mắc quá', phonetic: '馬 瓜' },
+  { id: 5, category: '購物', zh: '結帳', target: 'Tính tiền', phonetic: '丁 點' },
+  { id: 6, category: '日常', zh: '你好', target: 'Xin chào', phonetic: '新 昭' },
+  { id: 7, category: '日常', zh: '謝謝', target: 'Cảm ơn', phonetic: '感恩' },
+  { id: 8, category: '交通', zh: '我要去這裡', target: 'Tôi muốn đến đây', phonetic: '多以 姆翁 點 堆' },
+  { id: 10, category: '日常', zh: '請問廁所在哪裡呢?', target: 'Xin hỏi nhà vệ sinh ở đâu?', phonetic: '新 害 娘 衛 仙 噁 豆' },
+];
+
+const PHRASES_JP = [
+  { id: 1, category: '餐飲', zh: '不要芥末', target: 'わさび抜きで', phonetic: '哇沙比 努ki 爹' },
+  { id: 2, category: '餐飲', zh: '請給我水', target: 'お水をください', phonetic: '歐咪組 歐 苦答撒一' },
+  { id: 3, category: '餐飲', zh: '很好吃', target: 'おいしいです', phonetic: '歐一西 爹蘇' },
+  { id: 4, category: '購物', zh: '多少錢', target: 'いくらですか？', phonetic: '一哭拉 爹蘇卡' },
+  { id: 5, category: '購物', zh: '免稅嗎？', target: '免税ですか？', phonetic: '面賊 爹蘇卡' },
+  { id: 6, category: '日常', zh: '你好', target: 'こんにちは', phonetic: '空尼奇哇' },
+  { id: 7, category: '日常', zh: '謝謝', target: 'ありがとうございます', phonetic: '阿里嘎多 勾扎一嘛蘇' },
+  { id: 8, category: '交通', zh: '車站怎麼走？', target: '駅はどこですか？', phonetic: '欸ki 哇 豆口 爹蘇卡' },
+  { id: 9, category: '日常', zh: '對不起/打擾了', target: 'すみません', phonetic: '蘇咪嘛線' },
+  { id: 10, category: '日常', zh: '廁所在哪裡？', target: 'トイレはどこですか？', phonetic: '偷一雷 哇 豆口 爹蘇卡' },
+];
+
+const TIPS_VN = [
   { id: 1, title: '床頭小費', min: 20000, max: 50000, desc: '每天早上放在枕頭上或床頭櫃', icon: '🛏️' },
   { id: 2, title: '行李員', min: 20000, max: 50000, desc: '按件計算，幫忙送到房間時給予', icon: '🧳' },
   { id: 3, title: '按摩 (一般)', min: 50000, max: 100000, desc: '60-90分鐘的平價街邊按摩', icon: '💆' },
@@ -44,14 +119,135 @@ const TIPS = [
   { id: 6, title: 'Grab 叫車', min: 10000, max: null, desc: '非強制，通常會將零頭給司機 (或不找零)', icon: '🚕' },
 ];
 
-const COMMON_PRICES = [
-  { id: 1, name: '法國麵包 (Bánh mì)', min: 20000, max: 40000, icon: '🥖' },
-  { id: 2, name: '路邊河粉 (Phở)', min: 40000, max: 60000, icon: '🍜' },
-  { id: 3, name: '冰煉乳咖啡', min: 20000, max: 40000, icon: '☕' },
-  { id: 4, name: '現剖椰子', min: 20000, max: 30000, icon: '🥥' },
-  { id: 5, name: 'Grab 短程 (約3km)', min: 30000, max: 50000, icon: '🚕' },
-  { id: 6, name: '平價按摩 (60分鐘)', min: 200000, max: 300000, icon: '💆' },
+const TIPS_JP = [
+  { id: 1, title: '日本無小費文化', min: 0, max: null, desc: '日本通常不需要給小費，過多的金錢反而可能造成困擾。', icon: '🇯🇵' },
+  { id: 2, title: '服務費', min: 0, max: null, desc: '部分高級餐廳或飯店會直接在帳單中加入 10-15% 的服務費。', icon: '🧾' },
+  { id: 3, title: '旅館 (心付け)', min: 1000, max: 3000, desc: '極少數傳統高級旅館，若服務極佳可考慮給予，但非必要。', icon: '🏨' },
 ];
+
+const REGIONAL_DATA_VN = {
+  north: {
+    name: '北越 (河內)',
+    prices: [
+      { id: 1, name: '法國麵包 (Bánh mì)', min: 20000, max: 35000, icon: '🥖' },
+      { id: 2, name: '路邊河粉 (Phở)', min: 40000, max: 65000, icon: '🍜' },
+      { id: 3, name: '雞蛋咖啡 (Cà phê trứng)', min: 35000, max: 50000, icon: '☕' },
+      { id: 4, name: '現剖椰子', min: 25000, max: 35000, icon: '🥥' },
+      { id: 5, name: 'Grab 短程 (約3km)', min: 30000, max: 50000, icon: '🚕' },
+      { id: 6, name: '平價按摩 (60分鐘)', min: 180000, max: 280000, icon: '💆' },
+    ],
+    souvenirs: [
+      { id: 101, name: 'O Mai (蜜餞/鹹酸甜)', min: 50000, max: 150000, icon: '🍑' },
+      { id: 102, name: '河內絲綢', min: 200000, max: 1000000, icon: '🧣' },
+      { id: 103, name: '綠米片 (Cốm)', min: 30000, max: 60000, icon: '🌾' },
+    ]
+  },
+  south: {
+    name: '南越 (胡志明市)',
+    prices: [
+      { id: 1, name: '法國麵包 (Bánh mì)', min: 25000, max: 45000, icon: '🥖' },
+      { id: 2, name: '路邊河粉 (Phở)', min: 50000, max: 80000, icon: '🍜' },
+      { id: 3, name: '冰煉乳咖啡', min: 20000, max: 40000, icon: '☕' },
+      { id: 4, name: '現剖椰子', min: 20000, max: 30000, icon: '🥥' },
+      { id: 5, name: 'Grab 短程 (約3km)', min: 35000, max: 55000, icon: '🚕' },
+      { id: 6, name: '平價按摩 (60分鐘)', min: 220000, max: 350000, icon: '💆' },
+    ],
+    souvenirs: [
+      { id: 201, name: '腰果 (帶皮)', min: 150000, max: 250000, icon: '🥜' },
+      { id: 202, name: 'Marou 巧克力', min: 50000, max: 120000, icon: '🍫' },
+      { id: 203, name: 'G7/中原咖啡豆', min: 80000, max: 300000, icon: '☕' },
+    ]
+  }
+};
+
+const REGIONAL_DATA_JP = {
+  kanto: {
+    name: '關東 (東京)',
+    prices: [
+      { id: 1, name: '拉麵', min: 800, max: 1500, icon: '🍜' },
+      { id: 2, name: '牛丼', min: 400, max: 700, icon: '🍚' },
+      { id: 3, name: '便利商店飯糰', min: 120, max: 200, icon: '🍙' },
+      { id: 4, name: '地鐵起步價', min: 170, max: 210, icon: '🚃' },
+      { id: 5, name: '星巴克拿鐵', min: 450, max: 600, icon: '☕' },
+      { id: 6, name: '居酒屋人均', min: 3000, max: 5000, icon: '🍺' },
+    ],
+    souvenirs: [
+      { id: 101, name: '薯條三兄弟', min: 1000, max: 2000, icon: '🍟' },
+      { id: 102, name: '藥妝品 (面膜/眼罩)', min: 500, max: 5000, icon: '💄' },
+      { id: 103, name: '動漫周邊', min: 500, max: 10000, icon: '🧸' },
+    ]
+  },
+  kansai: {
+    name: '關西 (大阪/京都)',
+    prices: [
+      { id: 1, name: '章魚燒 (6-8顆)', min: 500, max: 800, icon: '🐙' },
+      { id: 2, name: '大阪燒', min: 800, max: 1500, icon: '🍳' },
+      { id: 3, name: '抹茶甜點', min: 500, max: 1200, icon: '🍵' },
+      { id: 4, name: '公車一日券', min: 600, max: 1100, icon: '🚌' },
+      { id: 5, name: '串炸 (每串)', min: 100, max: 300, icon: '🍢' },
+      { id: 6, name: '神社御守', min: 500, max: 1000, icon: '⛩️' },
+    ],
+    souvenirs: [
+      { id: 201, name: '八橋 (京都)', min: 600, max: 1500, icon: '🥟' },
+      { id: 202, name: '呼吸巧克力', min: 1000, max: 2500, icon: '🍫' },
+      { id: 203, name: '宇治抹茶粉', min: 1000, max: 3000, icon: '🍵' },
+    ]
+  }
+};
+
+const PHRASES_KR = [
+  { id: 1, category: '餐飲', zh: '不要香菜', target: '고수 빼주세요', phonetic: '勾速 胚組誰優' },
+  { id: 2, category: '餐飲', zh: '請給我水', target: '물 좀 주세요', phonetic: '姆 宗 珠誰優' },
+  { id: 3, category: '餐飲', zh: '很好吃', target: '맛있어요', phonetic: '馬西搜優' },
+  { id: 4, category: '購物', zh: '多少錢', target: '얼마예요?', phonetic: '歐馬耶優' },
+  { id: 5, category: '購物', zh: '太貴了', target: '너무 비싸요', phonetic: '農姆 比撒優' },
+  { id: 6, category: '日常', zh: '你好', target: '안녕하세요', phonetic: '安寧哈誰優' },
+  { id: 7, category: '日常', zh: '謝謝', target: '감사합니다', phonetic: '康撒哈米答' },
+  { id: 8, category: '交通', zh: '我要去這裡', target: '여기로 가주세요', phonetic: '優gi柔 嘎珠誰優' },
+  { id: 9, category: '日常', zh: '對不起', target: '죄송합니다', phonetic: '崔松哈米答' },
+  { id: 10, category: '日常', zh: '廁所在哪裡？', target: '화장실이 어디예요?', phonetic: '花張西里 歐底耶優' },
+];
+
+const TIPS_KR = [
+  { id: 1, title: '韓國無小費文化', min: 0, max: null, desc: '韓國與日本一樣，通常不需要給小費。', icon: '🇰🇷' },
+  { id: 2, title: '服務費', min: 0, max: null, desc: '部分高級餐廳或飯店會直接在帳單中加入 10% 的服務費。', icon: '🧾' },
+  { id: 3, title: '計程車', min: 0, max: null, desc: '不需要給小費，若想表示感謝可以說不用找零。', icon: '🚕' },
+];
+
+const REGIONAL_DATA_KR = {
+  seoul: {
+    name: '首爾',
+    prices: [
+      { id: 1, name: '韓式拌飯', min: 8000, max: 12000, icon: '🍚' },
+      { id: 2, name: '辣炒年糕', min: 3500, max: 5000, icon: '🍢' },
+      { id: 3, name: '韓式炸雞', min: 18000, max: 25000, icon: '🍗' },
+      { id: 4, name: '地鐵起步價', min: 1400, max: 1500, icon: '🚃' },
+      { id: 5, name: '美式咖啡', min: 2000, max: 5000, icon: '☕' },
+      { id: 6, name: '路邊攤魚板', min: 1000, max: 2000, icon: '🍢' },
+    ],
+    souvenirs: [
+      { id: 101, name: '韓式海苔', min: 5000, max: 15000, icon: '🍱' },
+      { id: 102, name: '美妝保養品', min: 10000, max: 100000, icon: '💄' },
+      { id: 103, name: '人蔘產品', min: 30000, max: 500000, icon: '🌿' },
+    ]
+  },
+  busan: {
+    name: '釜山',
+    prices: [
+      { id: 1, name: '豬肉湯飯', min: 8000, max: 10000, icon: '🍲' },
+      { id: 2, name: '堅果糖餅', min: 1500, max: 2500, icon: '🥞' },
+      { id: 3, name: '生魚片 (人均)', min: 30000, max: 60000, icon: '🐟' },
+      { id: 4, name: '公車起步價', min: 1200, max: 1550, icon: '🚌' },
+      { id: 5, name: '海雲台咖啡', min: 4000, max: 7000, icon: '☕' },
+      { id: 6, name: '魚板麵', min: 6000, max: 9000, icon: '🍜' },
+    ],
+    souvenirs: [
+      { id: 201, name: '釜山魚板', min: 10000, max: 30000, icon: '🍢' },
+      { id: 202, name: '海鮮乾貨', min: 15000, max: 50000, icon: '🦑' },
+      { id: 203, name: '特色明信片', min: 1000, max: 3000, icon: '📮' },
+    ]
+  }
+};
 
 // --- Components ---
 
@@ -256,11 +452,19 @@ interface ConverterProps {
   exchangeRate: number;
   lastUpdated: string;
   isLoadingRate: boolean;
+  regionalData: any;
+  currencySymbol: string;
+  currencyName: string;
+  country: 'vietnam' | 'japan' | 'thailand' | 'korea';
+  themeText: string;
+  themeBg: string;
+  themeBorder: string;
 }
 
-function Converter({ exchangeRate, lastUpdated, isLoadingRate }: ConverterProps) {
+function Converter({ exchangeRate, lastUpdated, isLoadingRate, regionalData, currencySymbol, currencyName, country, themeText, themeBg, themeBorder }: ConverterProps) {
   const [vnd, setVnd] = useState<string>('');
   const [twd, setTwd] = useState<string>('');
+  const [region, setRegion] = useState<string>(Object.keys(regionalData)[0]);
 
   const handleVndChange = (val: string) => {
     const num = parseInt(val.replace(/\D/g, ''), 10);
@@ -296,18 +500,18 @@ function Converter({ exchangeRate, lastUpdated, isLoadingRate }: ConverterProps)
 
   return (
     <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
-      <div className="bg-white rounded-3xl p-6 shadow-sm border border-emerald-100">
+      <div className={`bg-white rounded-3xl p-6 shadow-sm border ${themeBorder}`}>
         <div className="flex justify-between items-start mb-4">
           <div>
-            <h2 className="text-lg font-semibold text-emerald-900">匯率換算</h2>
+            <h2 className={`text-lg font-semibold ${themeText.replace('600', '900')}`}>匯率換算</h2>
             <div className="flex items-center text-xs text-gray-400 mt-1 gap-1">
               <RefreshCw size={10} className={isLoadingRate ? "animate-spin" : ""} />
               {isLoadingRate ? '更新中...' : `最後更新: ${lastUpdated}`}
             </div>
           </div>
           <div className="flex flex-col items-end gap-2">
-            <span className="text-xs font-medium text-emerald-600 bg-emerald-50 px-2 py-1 rounded-full">
-              1 TWD ≈ {Math.round(exchangeRate)} VND
+            <span className={`text-xs font-medium ${themeText} ${themeBg} px-2 py-1 rounded-full`}>
+              1 TWD ≈ {exchangeRate.toFixed(country === 'vietnam' ? 0 : 2)} {currencyName}
             </span>
             <button 
               onClick={handleClear} 
@@ -319,10 +523,12 @@ function Converter({ exchangeRate, lastUpdated, isLoadingRate }: ConverterProps)
         </div>
 
         {/* VND Input */}
-        <div className="bg-gray-50 rounded-2xl p-4 mb-4 relative overflow-hidden focus-within:ring-2 focus-within:ring-emerald-500 transition-all">
-          <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1">越南盾 (VND)</label>
+        <div className={`bg-gray-50 rounded-2xl p-4 mb-4 relative overflow-hidden focus-within:ring-2 focus-within:ring-emerald-500 transition-all`}>
+          <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1">
+            {currencyName === 'VND' ? '越南盾 (VND)' : (currencyName === 'JPY' ? '日圓 (JPY)' : (currencyName === 'THB' ? '泰銖 (THB)' : '韓元 (KRW)'))}
+          </label>
           <div className="flex items-center">
-            <span className="text-2xl font-medium text-gray-400 mr-2">₫</span>
+            <span className="text-2xl font-medium text-gray-400 mr-2">{currencySymbol}</span>
             <input
               type="text"
               inputMode="numeric"
@@ -336,14 +542,14 @@ function Converter({ exchangeRate, lastUpdated, isLoadingRate }: ConverterProps)
 
         <div className="flex justify-center -my-7 relative z-10">
           <div className="bg-white p-2 rounded-full shadow-sm border border-gray-100">
-            <div className="bg-emerald-100 text-emerald-600 p-2 rounded-full">
+            <div className={`${themeBg} ${themeText} p-2 rounded-full`}>
               <ArrowRightLeft size={20} className="rotate-90" />
             </div>
           </div>
         </div>
 
         {/* TWD Input */}
-        <div className="bg-gray-50 rounded-2xl p-4 mt-4 relative overflow-hidden focus-within:ring-2 focus-within:ring-emerald-500 transition-all">
+        <div className={`bg-gray-50 rounded-2xl p-4 mt-4 relative overflow-hidden focus-within:ring-2 focus-within:ring-emerald-500 transition-all`}>
           <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1">新台幣 (TWD)</label>
           <div className="flex items-center">
             <span className="text-2xl font-medium text-gray-400 mr-2">$</span>
@@ -361,43 +567,101 @@ function Converter({ exchangeRate, lastUpdated, isLoadingRate }: ConverterProps)
 
       {/* Quick Add Buttons */}
       <div>
-        <h3 className="text-sm font-medium text-gray-500 mb-3 px-1">快速加入 (VND)</h3>
+        <h3 className="text-sm font-medium text-gray-500 mb-3 px-1">快速加入 ({currencyName})</h3>
         <div className="grid grid-cols-4 gap-2">
-          {[10000, 50000, 100000, 500000].map((amount) => (
+          {(country === 'vietnam' ? [10000, 50000, 100000, 500000] : (country === 'korea' ? [1000, 5000, 10000, 50000] : [100, 500, 1000, 5000])).map((amount) => (
             <button
               key={amount}
               onClick={() => addVnd(amount)}
-              className="bg-white border border-gray-200 rounded-xl py-3 text-sm font-semibold text-gray-700 hover:bg-emerald-50 hover:border-emerald-200 hover:text-emerald-700 transition-colors active:scale-95"
+              className={`bg-white border border-gray-200 rounded-xl py-3 text-sm font-semibold text-gray-700 hover:${themeBg} hover:${themeBorder} hover:${themeText} transition-colors active:scale-95`}
             >
-              +{amount / 1000}k
+              {country === 'vietnam' ? `+${amount / 1000}k` : (country === 'korea' ? `+${amount / 1000}k` : `+${amount}`)}
             </button>
           ))}
         </div>
-        <p className="text-xs text-gray-400 mt-3 text-center flex items-center justify-center gap-1">
-          <Info size={12} />
-          當地人報價常省略後面的三個零 (如 50k = 50,000)
-        </p>
+        {country === 'vietnam' && (
+          <p className="text-xs text-gray-400 mt-3 text-center flex items-center justify-center gap-1">
+            <Info size={12} />
+            當地人報價常省略後面的三個零 (如 50k = 50,000)
+          </p>
+        )}
       </div>
 
       {/* Warning Section */}
-      <div className="bg-red-50 border border-red-100 rounded-2xl p-4">
-        <h4 className="text-sm font-bold text-red-800 mb-2 flex items-center gap-1">
-          <AlertTriangle size={16} /> 防坑與防詐騙提醒
-        </h4>
-        <ul className="text-xs text-red-700 space-y-1.5 list-disc pl-4">
-          <li><strong>確認鈔票零的數量：</strong> 500k 與 50k 顏色相近，給錢前務必看清楚。</li>
-          <li><strong>沒有標價先問價：</strong> 路邊攤若無標價，點餐/拿取前一定要先問「Bao nhiêu tiền? (多少錢)」，或用手機按計算機確認。</li>
-          <li><strong>搭車請用 Grab：</strong> 避免路邊隨機攔車，若必須攔車請認明 Vinasun 或 Mai Linh 車隊並要求跳表 (By meter)。</li>
-        </ul>
-      </div>
+      {country === 'vietnam' && (
+        <div className="bg-red-50 border border-red-100 rounded-2xl p-4">
+          <h4 className="text-sm font-bold text-red-800 mb-2 flex items-center gap-1">
+            <AlertTriangle size={16} /> 防坑與防詐騙提醒
+          </h4>
+          <ul className="text-xs text-red-700 space-y-1.5 list-disc pl-4">
+            <li><strong>確認鈔票零的數量：</strong> 500k 與 50k 顏色相近，給錢前務必看清楚。</li>
+            <li><strong>沒有標價先問價：</strong> 路邊攤若無標價，點餐/拿取前一定要先問「Bao nhiêu tiền? (多少錢)」，或用手機按計算機確認。</li>
+            <li><strong>搭車請用 Grab：</strong> 避免路邊隨機攔車，若必須攔車請認明 Vinasun 或 Mai Linh 車隊並要求跳表 (By meter)。</li>
+          </ul>
+        </div>
+      )}
 
-      {/* Common Prices Reference */}
-      <div>
-        <h3 className="text-sm font-bold text-gray-800 mb-3 px-1 flex items-center gap-1">
-          <Tag size={16} className="text-emerald-600" /> 當地合理物價參考
-        </h3>
+      {country === 'japan' && (
+        <div className="bg-blue-50 border border-blue-100 rounded-2xl p-4">
+          <h4 className="text-sm font-bold text-blue-800 mb-2 flex items-center gap-1">
+            <Info size={16} /> 日本旅遊小撇步
+          </h4>
+          <ul className="text-xs text-blue-700 space-y-1.5 list-disc pl-4">
+            <li><strong>準備零錢包：</strong> 日本有大量的硬幣 (1, 5, 10, 50, 100, 500)，準備一個好拿取的零錢包非常重要。</li>
+            <li><strong>西瓜卡/ICOCA：</strong> 必備交通卡，不僅可搭車，便利商店與許多自動販賣機都能使用。</li>
+            <li><strong>垃圾請帶回飯店：</strong> 日本街頭極少垃圾桶，通常在便利商店門口或車站內才有。</li>
+          </ul>
+        </div>
+      )}
+
+      {country === 'thailand' && (
+        <div className="bg-blue-50 border border-blue-100 rounded-2xl p-4">
+          <h4 className="text-sm font-bold text-blue-800 mb-2 flex items-center gap-1">
+            <Info size={16} /> 泰國旅遊小撇步
+          </h4>
+          <ul className="text-xs text-blue-700 space-y-1.5 list-disc pl-4">
+            <li><strong>善用叫車 App：</strong> 推薦使用 Grab 或 Bolt，價格透明且可避免與嘟嘟車司機議價。</li>
+            <li><strong>進入寺廟穿著：</strong> 參觀寺廟時需穿著過膝長褲/裙，且不可穿背心，部分景點提供租借服務。</li>
+            <li><strong>準備 20 銖紙鈔：</strong> 泰國小費文化盛行，準備一些 20 銖紙鈔方便給予床頭或行李小費。</li>
+          </ul>
+        </div>
+      )}
+
+      {country === 'korea' && (
+        <div className="bg-indigo-50 border border-indigo-100 rounded-2xl p-4">
+          <h4 className="text-sm font-bold text-indigo-800 mb-2 flex items-center gap-1">
+            <Info size={16} /> 韓國旅遊小撇步
+          </h4>
+          <ul className="text-xs text-indigo-700 space-y-1.5 list-disc pl-4">
+            <li><strong>T-money 卡：</strong> 必備交通卡，便利商店皆可購買與儲值，也可用於小額支付。</li>
+            <li><strong>地圖 App：</strong> Google Maps 在韓國導航不準，推薦下載 Naver Map 或 KakaoMap。</li>
+            <li><strong>獨旅點餐：</strong> 韓國部分餐廳（如烤肉、火鍋）有「兩人份起點」的規定，點餐前可先確認。</li>
+          </ul>
+        </div>
+      )}
+
+      {/* Regional Prices & Souvenirs */}
+      <div className="space-y-4">
+        <div className="flex items-center justify-between px-1">
+          <h3 className="text-sm font-bold text-gray-800 flex items-center gap-1">
+            <Tag size={16} className={themeText} /> 當地物價與伴手禮
+          </h3>
+          <div className="flex bg-gray-100 p-1 rounded-lg">
+            {Object.keys(regionalData).map((key) => (
+              <button 
+                key={key}
+                onClick={() => setRegion(key)}
+                className={`px-3 py-1 text-[10px] font-bold rounded-md transition-colors ${region === key ? 'bg-white ' + themeText + ' shadow-sm' : 'text-gray-500'}`}
+              >
+                {regionalData[key].name}
+              </button>
+            ))}
+          </div>
+        </div>
+
         <div className="grid grid-cols-1 gap-2">
-          {COMMON_PRICES.map(item => {
+          <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider px-1">合理物價參考</p>
+          {regionalData[region].prices.map((item: any) => {
             const twdMin = Math.round(item.min / exchangeRate);
             const twdMax = Math.round(item.max / exchangeRate);
             return (
@@ -407,7 +671,27 @@ function Converter({ exchangeRate, lastUpdated, isLoadingRate }: ConverterProps)
                   <span className="text-sm font-bold text-gray-700">{item.name}</span>
                 </div>
                 <div className="text-right">
-                  <div className="text-sm font-bold text-emerald-600">{item.min.toLocaleString()} - {item.max.toLocaleString()} ₫</div>
+                  <div className={`text-sm font-bold ${themeText}`}>{item.min.toLocaleString()} - {item.max.toLocaleString()} {currencySymbol}</div>
+                  <div className="text-xs font-medium text-gray-400 mt-0.5">約 ${twdMin} - ${twdMax} TWD</div>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+
+        <div className="grid grid-cols-1 gap-2 mt-4">
+          <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider px-1">熱門伴手禮推薦</p>
+          {regionalData[region].souvenirs.map((item: any) => {
+            const twdMin = Math.round(item.min / exchangeRate);
+            const twdMax = Math.round(item.max / exchangeRate);
+            return (
+              <div key={item.id} className={`bg-white border ${themeBorder.replace('100', '50')} rounded-xl p-3 flex items-center justify-between shadow-sm`}>
+                <div className="flex items-center gap-3">
+                  <span className={`text-2xl ${themeBg} p-1.5 rounded-lg`}>{item.icon}</span>
+                  <span className="text-sm font-bold text-gray-700">{item.name}</span>
+                </div>
+                <div className="text-right">
+                  <div className={`text-sm font-bold ${themeText}`}>{item.min.toLocaleString()} - {item.max.toLocaleString()} {currencySymbol}</div>
                   <div className="text-xs font-medium text-gray-400 mt-0.5">約 ${twdMin} - ${twdMax} TWD</div>
                 </div>
               </div>
@@ -419,33 +703,20 @@ function Converter({ exchangeRate, lastUpdated, isLoadingRate }: ConverterProps)
   );
 }
 
-function LiveTranslator() {
-  const [mode, setMode] = useState<'speak' | 'listen'>('speak');
+interface LiveTranslatorProps {
+  targetLang: string;
+  title: string;
+  themeText: string;
+  themeBg: string;
+  themeBorder: string;
+}
+
+function LiveTranslator({ targetLang, title, themeText, themeBg, themeBorder }: LiveTranslatorProps) {
   const [inputText, setInputText] = useState('');
-  const [recognizedText, setRecognizedText] = useState('');
   const [translatedText, setTranslatedText] = useState('');
-  const [isListening, setIsListening] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [hasViVoice, setHasViVoice] = useState<boolean | null>(null);
-
-  useEffect(() => {
-    if (!('speechSynthesis' in window)) {
-      setHasViVoice(false);
-      return;
-    }
-
-    const checkVoices = () => {
-      const voices = window.speechSynthesis.getVoices();
-      if (voices.length > 0) {
-        const vi = voices.some(v => v.lang.includes('vi') || v.lang.includes('VI'));
-        setHasViVoice(vi);
-      }
-    };
-
-    checkVoices();
-    window.speechSynthesis.onvoiceschanged = checkVoices;
-  }, []);
+  const [isListening, setIsListening] = useState(false);
+  const [mode, setMode] = useState<'zh-to-local' | 'local-to-zh'>('zh-to-local');
 
   const translateText = async (text: string, sl: string, tl: string) => {
     const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=${sl}&tl=${tl}&dt=t&q=${encodeURIComponent(text)}`;
@@ -454,60 +725,15 @@ function LiveTranslator() {
     return data[0].map((item: any) => item[0]).join('');
   };
 
-  const playVietnameseText = async (text: string) => {
-    if (!text.trim() || isPlaying || !hasViVoice) return;
-    
-    if (!('speechSynthesis' in window)) return;
-
-    setIsPlaying(true);
-    try {
-      window.speechSynthesis.cancel();
-      const utterance = new SpeechSynthesisUtterance(text);
-      utterance.lang = 'vi-VN';
-      
-      const voices = window.speechSynthesis.getVoices();
-      const viVoice = voices.find(voice => voice.lang.includes('vi') || voice.lang.includes('VI'));
-      if (viVoice) {
-        utterance.voice = viVoice;
-      }
-
-      await new Promise<void>((resolve, reject) => {
-        utterance.onend = () => resolve();
-        utterance.onerror = (err) => reject(err);
-        window.speechSynthesis.speak(utterance);
-      });
-    } catch (e) {
-      console.error('Speech synthesis error:', e);
-      alert('語音播放失敗');
-    } finally {
-      setIsPlaying(false);
-    }
-  };
-
-  const handleTranslateAndSpeak = async () => {
+  const handleTranslate = async () => {
     if (!inputText.trim()) return;
     setIsLoading(true);
     setTranslatedText('');
     try {
-      const viText = await translateText(inputText, 'zh-TW', 'vi');
-      setTranslatedText(viText);
-      setIsLoading(false);
-
-      if (hasViVoice) {
-        await playVietnameseText(viText);
-      }
-    } catch (e) {
-      console.error(e);
-      alert('翻譯失敗');
-      setIsLoading(false);
-    }
-  };
-
-  const translateViToZh = async (viText: string) => {
-    setIsLoading(true);
-    try {
-      const zhText = await translateText(viText, 'vi', 'zh-TW');
-      setTranslatedText(zhText);
+      const sl = mode === 'zh-to-local' ? 'zh-TW' : targetLang;
+      const tl = mode === 'zh-to-local' ? targetLang : 'zh-TW';
+      const result = await translateText(inputText, sl, tl);
+      setTranslatedText(result);
     } catch (e) {
       console.error(e);
       alert('翻譯失敗');
@@ -516,253 +742,203 @@ function LiveTranslator() {
     }
   };
 
-  const startListening = () => {
-    const SpeechRecognition = window.SpeechRecognition || (window as any).webkitSpeechRecognition;
+  const startListening = (forcedMode?: 'zh-to-local' | 'local-to-zh') => {
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SpeechRecognition) {
-      alert('您的瀏覽器不支援語音辨識功能，請使用 Chrome 或 Safari。');
+      alert('您的瀏覽器不支持語音辨識');
       return;
     }
-    const recognition = new SpeechRecognition();
-    recognition.lang = 'vi-VN';
-    recognition.continuous = false;
-    recognition.interimResults = true;
 
-    recognition.onstart = () => {
-      setIsListening(true);
-      setRecognizedText('');
-      setTranslatedText('');
-    };
-    
-    recognition.onresult = (event: any) => {
-      const transcript = Array.from(event.results)
-        .map((result: any) => result[0])
-        .map((result: any) => result.transcript)
-        .join('');
-      setRecognizedText(transcript);
-      
-      if (event.results[0].isFinal) {
-        translateViToZh(transcript);
-      }
-    };
-    
-    recognition.onerror = (event: any) => {
-      setIsListening(false);
-      if (event.error === 'no-speech') {
-        // 這是正常現象，代表麥克風沒有收到聲音，不需要報錯
-        return;
-      }
-      console.error('Speech recognition error:', event.error);
-      alert('語音辨識發生錯誤: ' + event.error);
-    };
-    
+    const activeMode = forcedMode || mode;
+    const recognition = new SpeechRecognition();
+    recognition.lang = activeMode === 'zh-to-local' ? 'zh-TW' : (targetLang === 'vi' ? 'vi-VN' : (targetLang === 'ja' ? 'ja-JP' : (targetLang === 'th' ? 'th-TH' : 'ko-KR')));
+    recognition.interimResults = false;
+    recognition.maxAlternatives = 1;
+
+    recognition.onstart = () => setIsListening(true);
     recognition.onend = () => setIsListening(false);
+    recognition.onerror = (event: any) => {
+      console.error('Speech recognition error', event.error);
+      setIsListening(false);
+    };
+
+    recognition.onresult = async (event: any) => {
+      const transcript = event.results[0][0].transcript;
+      setInputText(transcript);
+      setIsLoading(true);
+      try {
+        const sl = activeMode === 'zh-to-local' ? 'zh-TW' : targetLang;
+        const tl = activeMode === 'zh-to-local' ? targetLang : 'zh-TW';
+        const result = await translateText(transcript, sl, tl);
+        setTranslatedText(result);
+      } catch (e) {
+        console.error(e);
+        alert('翻譯失敗');
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
     recognition.start();
   };
 
   return (
-    <div className="bg-white rounded-2xl p-4 shadow-sm border border-gray-100">
+    <div className="bg-white rounded-2xl p-4 shadow-sm border border-gray-100 overflow-hidden">
       <div className="flex items-center justify-between mb-4">
         <h3 className="text-base font-bold text-gray-900 flex items-center gap-2">
-          <Languages size={18} className="text-emerald-600" />
-          即時翻譯
+          <MessageSquare size={18} className={themeText} />
+          對話翻譯
         </h3>
-        <div className="flex bg-gray-100 p-1 rounded-lg">
+        <div className="flex bg-gray-100 p-1 rounded-xl">
           <button 
-            onClick={() => { setMode('speak'); setTranslatedText(''); setRecognizedText(''); setInputText(''); }}
-            className={`px-3 py-1 text-xs font-medium rounded-md transition-colors ${mode === 'speak' ? 'bg-white text-emerald-700 shadow-sm' : 'text-gray-500'}`}
+            onClick={() => { 
+              setMode('zh-to-local'); 
+              setInputText(''); 
+              setTranslatedText(''); 
+              startListening('zh-to-local');
+            }}
+            className={`px-3 py-1.5 text-[10px] font-bold rounded-lg transition-all ${mode === 'zh-to-local' ? 'bg-white ' + themeText + ' shadow-sm' : 'text-gray-500'}`}
           >
-            說越文
+            我說中文
           </button>
           <button 
-            onClick={() => { setMode('listen'); setTranslatedText(''); setRecognizedText(''); setInputText(''); }}
-            className={`px-3 py-1 text-xs font-medium rounded-md transition-colors ${mode === 'listen' ? 'bg-white text-emerald-700 shadow-sm' : 'text-gray-500'}`}
+            onClick={() => { 
+              setMode('local-to-zh'); 
+              setInputText(''); 
+              setTranslatedText(''); 
+              startListening('local-to-zh');
+            }}
+            className={`px-3 py-1.5 text-[10px] font-bold rounded-lg transition-all ${mode === 'local-to-zh' ? 'bg-white ' + themeText + ' shadow-sm' : 'text-gray-500'}`}
           >
-            聽越語
+            聽當地話
           </button>
         </div>
       </div>
 
-      {mode === 'speak' ? (
-        <div className="space-y-3">
-          {hasViVoice === false && (
-            <div className="p-3 bg-yellow-50 border border-yellow-200 rounded-xl flex items-start gap-2 text-yellow-800 text-xs">
-              <AlertTriangle size={16} className="shrink-0 mt-0.5" />
-              <p>
-                您的設備尚未安裝「越南語」語音包，目前僅提供翻譯功能。若要啟用發音，請前往系統設定下載越南語音。
-              </p>
-            </div>
-          )}
+      <div className="space-y-3">
+        <div className="relative">
           <textarea 
             value={inputText}
             onChange={(e) => setInputText(e.target.value)}
-            placeholder="輸入想說的中文..."
-            className="w-full bg-gray-50 border border-gray-200 rounded-xl p-3 text-sm focus:ring-2 focus:ring-emerald-500 focus:border-transparent outline-none resize-none h-20"
+            placeholder={mode === 'zh-to-local' ? "輸入或說中文..." : `正在聽${title}...`}
+            className="w-full bg-gray-50 border border-gray-200 rounded-xl p-3 pt-4 text-sm focus:ring-2 focus:ring-emerald-500 focus:border-transparent outline-none resize-none h-24"
           />
+          <div className="absolute top-2 left-3 text-[9px] font-bold text-gray-400 uppercase tracking-wider">
+            {mode === 'zh-to-local' ? '中文' : title}
+          </div>
           <button 
-            onClick={handleTranslateAndSpeak}
-            disabled={isLoading || isPlaying || !inputText.trim()}
-            className="w-full bg-emerald-600 text-white rounded-xl py-3 font-medium flex items-center justify-center gap-2 disabled:opacity-50 active:scale-[0.98] transition-all"
+            onClick={() => startListening()}
+            className={`absolute bottom-3 right-3 p-2.5 rounded-full shadow-md transition-all ${isListening ? 'bg-red-500 text-white animate-pulse' : 'bg-white text-gray-500 hover:bg-gray-50'}`}
           >
-            {isLoading ? <RefreshCw size={18} className="animate-spin" /> : isPlaying ? <Volume2 size={18} className="animate-pulse" /> : hasViVoice === false ? <Languages size={18} /> : <Play size={18} />}
-            {isLoading ? '翻譯中...' : isPlaying ? '播放中...' : hasViVoice === false ? '僅翻譯 (未安裝語音包)' : '翻譯並發音'}
+            {isListening ? <MicOff size={18} /> : <Mic size={18} />}
           </button>
-          {translatedText && (
-            <div className="mt-3 p-3 bg-emerald-50 rounded-xl border border-emerald-100 flex items-start justify-between gap-2">
-              <div>
-                <p className="text-xs text-emerald-600 font-bold mb-1">越南語翻譯：</p>
-                <p className="text-sm font-medium text-gray-800">{translatedText}</p>
-              </div>
-              {hasViVoice !== false && (
-                <button 
-                  onClick={() => playVietnameseText(translatedText)}
-                  disabled={isPlaying}
-                  className="p-2 bg-emerald-100 text-emerald-700 rounded-full hover:bg-emerald-200 transition-colors disabled:opacity-50 shrink-0"
-                >
-                  {isPlaying ? <Volume2 size={16} className="animate-pulse" /> : <Volume2 size={16} />}
-                </button>
-              )}
-            </div>
-          )}
         </div>
-      ) : (
-        <div className="space-y-4 flex flex-col items-center">
-          <button 
-            onClick={startListening}
-            disabled={isListening || isLoading}
-            className={`w-20 h-20 rounded-full flex items-center justify-center transition-all shadow-md ${
-              isListening 
-                ? 'bg-red-500 text-white animate-pulse scale-110 shadow-red-200' 
-                : 'bg-emerald-100 text-emerald-600 hover:bg-emerald-200'
-            }`}
-          >
-            <Mic size={32} />
-          </button>
-          <p className="text-xs text-gray-500 font-medium">
-            {isListening ? '正在聆聽越南語...' : '點擊麥克風開始收音'}
-          </p>
 
-          {(recognizedText || translatedText) && (
-            <div className="w-full space-y-2 mt-2 text-left">
-              {recognizedText && (
-                <div className="p-3 bg-gray-50 rounded-xl border border-gray-100 flex items-start justify-between gap-2">
-                  <div>
-                    <p className="text-[10px] text-gray-400 font-bold mb-1">聽到的越南語：</p>
-                    <p className="text-sm font-medium text-gray-700">{recognizedText}</p>
-                  </div>
-                  <button 
-                    onClick={() => playVietnameseText(recognizedText)}
-                    disabled={isPlaying}
-                    className="p-2 bg-gray-200 text-gray-600 rounded-full hover:bg-gray-300 transition-colors disabled:opacity-50 shrink-0"
-                  >
-                    {isPlaying ? <Volume2 size={16} className="animate-pulse" /> : <Volume2 size={16} />}
-                  </button>
-                </div>
-              )}
-              {translatedText && (
-                <div className="p-3 bg-emerald-50 rounded-xl border border-emerald-100">
-                  <p className="text-[10px] text-emerald-600 font-bold mb-1">中文翻譯：</p>
-                  <p className="text-sm font-medium text-gray-800">{translatedText}</p>
-                </div>
-              )}
-              {isLoading && !translatedText && (
-                <div className="p-3 bg-emerald-50 rounded-xl border border-emerald-100 flex items-center gap-2">
-                  <RefreshCw size={14} className="animate-spin text-emerald-600" />
-                  <p className="text-sm font-medium text-emerald-700">翻譯中...</p>
-                </div>
-              )}
-            </div>
-          )}
+        <div className="flex gap-2">
+          <button 
+            onClick={handleTranslate}
+            disabled={isLoading || !inputText.trim()}
+            className={`flex-1 ${themeText.replace('text', 'bg')} text-white rounded-xl py-3 font-bold text-sm flex items-center justify-center gap-2 disabled:opacity-50 active:scale-[0.98] transition-all shadow-sm`}
+          >
+            {isLoading ? <RefreshCw size={18} className="animate-spin" /> : <ArrowRightLeft size={18} />}
+            {isLoading ? '翻譯中...' : '立即翻譯'}
+          </button>
+          <button 
+            onClick={() => { setInputText(''); setTranslatedText(''); }}
+            className="px-4 bg-gray-100 text-gray-500 rounded-xl hover:bg-gray-200 transition-colors"
+          >
+            <Trash2 size={18} />
+          </button>
         </div>
-      )}
+
+        {translatedText && (
+          <motion.div 
+            initial={{ opacity: 0, y: 5 }} 
+            animate={{ opacity: 1, y: 0 }}
+            className={`p-4 ${themeBg} rounded-xl border ${themeBorder} relative`}
+          >
+            <div className="text-[9px] font-bold text-gray-400 uppercase tracking-wider mb-1">
+              {mode === 'zh-to-local' ? title : '中文'}
+            </div>
+            <p className="text-lg font-bold text-gray-800 leading-tight">{translatedText}</p>
+          </motion.div>
+        )}
+      </div>
     </div>
   );
 }
 
-function Phrasebook() {
-  const [playingId, setPlayingId] = useState<number | null>(null);
+interface PhrasebookProps {
+  phrases: any[];
+  targetLang: string;
+  translatorTitle: string;
+  countryName: string;
+  themeText: string;
+  themeBg: string;
+  themeBorder: string;
+}
 
-  const speak = async (id: number) => {
-    if (playingId === id) return; // Prevent double click
-    
-    setPlayingId(id);
-    
-    try {
-      // Get pre-generated audio from imported JSON
-      const audioDataUrl = (ttsData as Record<string, string>)[id.toString()];
-      
-      if (audioDataUrl && audioDataUrl.trim() !== "") {
-        const audio = new Audio(audioDataUrl);
-        audio.onended = () => setPlayingId(null);
-        audio.onerror = () => {
-          console.warn('Pre-generated audio failed, falling back to browser TTS');
-          fallbackSpeak(id);
-        };
-        await audio.play();
-      } else {
-        // Fallback to browser TTS if no pre-generated audio
-        fallbackSpeak(id);
-      }
-    } catch (err: any) {
-      console.error('TTS failed:', err);
-      fallbackSpeak(id);
-    }
-  };
+function Phrasebook({ phrases, targetLang, translatorTitle, countryName, themeText, themeBg, themeBorder }: PhrasebookProps) {
+  const [availableVoice, setAvailableVoice] = useState<SpeechSynthesisVoice | null>(null);
 
-  const fallbackSpeak = (id: number) => {
-    const phrase = PHRASES.find(p => p.id === id);
-    if (!phrase || !('speechSynthesis' in window)) {
-      setPlayingId(null);
-      return;
-    }
+  useEffect(() => {
+    const updateVoices = () => {
+      const voices = window.speechSynthesis.getVoices();
+      const langCode = targetLang === 'vi' ? 'vi' : 'ja';
+      const voice = voices.find(v => v.lang.startsWith(langCode));
+      setAvailableVoice(voice || null);
+    };
 
-    const utterance = new SpeechSynthesisUtterance(phrase.vi);
-    utterance.lang = 'vi-VN';
-    utterance.onend = () => setPlayingId(null);
-    utterance.onerror = () => setPlayingId(null);
-    
-    // Try to find a Vietnamese voice
-    const voices = window.speechSynthesis.getVoices();
-    const viVoice = voices.find(v => v.lang.includes('vi') || v.lang.includes('VI'));
-    if (viVoice) utterance.voice = viVoice;
-    
+    updateVoices();
+    window.speechSynthesis.onvoiceschanged = updateVoices;
+    return () => {
+      window.speechSynthesis.onvoiceschanged = null;
+    };
+  }, [targetLang]);
+
+  const speak = (text: string) => {
+    if (!availableVoice) return;
+    window.speechSynthesis.cancel();
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.voice = availableVoice;
+    utterance.rate = 0.9;
     window.speechSynthesis.speak(utterance);
   };
 
   return (
     <div className="space-y-4 animate-in fade-in slide-in-from-bottom-4 duration-500 pb-6">
-      <LiveTranslator />
+      <LiveTranslator targetLang={targetLang} title={translatorTitle} themeText={themeText} themeBg={themeBg} themeBorder={themeBorder} />
 
       <div className="px-1 mb-2">
-        <h2 className="text-lg font-semibold text-emerald-900">手指越語</h2>
-        <p className="text-sm text-gray-500">點擊卡片發音，或直接指給當地人看</p>
+        <h2 className={`text-lg font-semibold ${themeText.replace('600', '900')}`}>手指{countryName}語</h2>
+        <p className="text-sm text-gray-500">直接指給當地人看，或參考發音標註</p>
       </div>
 
       <div className="grid gap-3">
-        {PHRASES.map((phrase) => (
+        {phrases.map((phrase) => (
           <div
             key={phrase.id}
-            onClick={() => speak(phrase.id)}
-            className="bg-white rounded-2xl p-4 shadow-sm border border-gray-100 active:scale-[0.98] transition-transform cursor-pointer flex items-center justify-between group hover:border-emerald-200"
+            className={`bg-white rounded-2xl p-4 shadow-sm border border-gray-100 transition-transform flex items-center justify-between group hover:${themeBorder}`}
           >
-            <div>
+            <div className="flex-1">
               <div className="flex items-center gap-2 mb-1">
                 <span className="text-[10px] font-bold px-2 py-0.5 bg-gray-100 text-gray-500 rounded-full">
                   {phrase.category}
                 </span>
                 <h3 className="text-base font-bold text-gray-900">{phrase.zh}</h3>
               </div>
-              <p className="text-xl font-medium text-emerald-600 mb-1">{phrase.vi}</p>
+              <p className={`text-xl font-medium ${themeText} mb-1`}>{phrase.target}</p>
               <p className="text-xs text-gray-400 font-mono">發音：{phrase.phonetic}</p>
             </div>
-            <button 
-              className={`h-10 w-10 rounded-full flex items-center justify-center transition-colors shrink-0 ${
-                playingId === phrase.id 
-                  ? 'bg-emerald-500 text-white animate-pulse' 
-                  : 'bg-emerald-50 text-emerald-600 group-hover:bg-emerald-100'
-              }`}
-            >
-              <Volume2 size={20} />
-            </button>
+            {availableVoice && (
+              <button 
+                onClick={() => speak(phrase.target)}
+                className={`p-3 rounded-full ${themeBg} ${themeText} hover:scale-110 transition-transform active:scale-95`}
+                title="播放發音"
+              >
+                <Volume2 size={20} />
+              </button>
+            )}
           </div>
         ))}
       </div>
@@ -770,17 +946,33 @@ function Phrasebook() {
   );
 }
 
-function TippingGuide({ exchangeRate }: { exchangeRate: number }) {
+interface TippingGuideProps {
+  tips: any[];
+  exchangeRate: number;
+  currencyName: string;
+  themeText: string;
+  themeBg: string;
+  country: 'vietnam' | 'japan' | 'thailand' | 'korea';
+}
+
+function TippingGuide({ tips, exchangeRate, currencyName, themeText, themeBg, country }: TippingGuideProps) {
   const formatAmount = (min: number, max: number | null) => {
+    if (min === 0 && !max) {
+      return (
+        <span className="text-lg font-semibold text-gray-400">
+          無需給予
+        </span>
+      );
+    }
     if (max) {
       const twdMin = Math.round(min / exchangeRate);
       const twdMax = Math.round(max / exchangeRate);
       return (
         <div className="flex flex-col">
-          <span className="text-lg font-semibold text-emerald-600">
-            {min.toLocaleString()} - {max.toLocaleString()} VND
+          <span className={`text-lg font-semibold ${themeText}`}>
+            {min.toLocaleString()} - {max.toLocaleString()} {currencyName}
           </span>
-          <span className="text-xs font-medium text-emerald-500/80">
+          <span className={`text-xs font-medium ${themeText}/80`}>
             (約 ${twdMin} - ${twdMax} TWD)
           </span>
         </div>
@@ -789,10 +981,10 @@ function TippingGuide({ exchangeRate }: { exchangeRate: number }) {
       const twdMin = Math.round(min / exchangeRate);
       return (
         <div className="flex flex-col">
-          <span className="text-lg font-semibold text-emerald-600">
-            {min.toLocaleString()} VND
+          <span className={`text-lg font-semibold ${themeText}`}>
+            {min.toLocaleString()} {currencyName}
           </span>
-          <span className="text-xs font-medium text-emerald-500/80">
+          <span className={`text-xs font-medium ${themeText}/80`}>
             (約 ${twdMin} TWD)
           </span>
         </div>
@@ -803,12 +995,12 @@ function TippingGuide({ exchangeRate }: { exchangeRate: number }) {
   return (
     <div className="space-y-4 animate-in fade-in slide-in-from-bottom-4 duration-500 pb-6">
       <div className="px-1 mb-2">
-        <h2 className="text-lg font-semibold text-emerald-900">小費行情指南</h2>
-        <p className="text-sm text-gray-500">越南有小費文化，以下為常見參考金額</p>
+        <h2 className={`text-lg font-semibold ${themeText.replace('600', '900')}`}>小費行情指南</h2>
+        <p className="text-sm text-gray-500">了解當地小費文化，避免尷尬</p>
       </div>
 
       <div className="grid gap-3">
-        {TIPS.map((tip) => (
+        {tips.map((tip) => (
           <div key={tip.id} className="bg-white rounded-2xl p-4 shadow-sm border border-gray-100 flex gap-4 items-start">
             <div className="text-3xl bg-gray-50 p-2 rounded-xl h-14 w-14 flex items-center justify-center shrink-0">
               {tip.icon}
@@ -829,7 +1021,10 @@ function TippingGuide({ exchangeRate }: { exchangeRate: number }) {
           <Info size={16} /> 溫馨提醒
         </h4>
         <p className="text-xs text-amber-700 leading-relaxed">
-          給小費時請直接給予紙鈔，盡量避免給硬幣或破舊的鈔票。若服務特別好，可以視情況多給一些。
+          {country === 'japan' && "尊重當地習俗是最好的禮儀。在日本，優質服務已包含在價格中，通常無需額外給予小費。"}
+          {country === 'vietnam' && "尊重當地習俗是最好的禮儀。在越南，適度的小費是對服務人員的實質鼓勵，尤其在按摩或包車服務。"}
+          {country === 'thailand' && "尊重當地習俗是最好的禮儀。在泰國，小費文化相當普遍，給予適當的小費（如 20-50 銖）是表達感謝的常見方式。"}
+          {country === 'korea' && "尊重當地習俗是最好的禮儀。在韓國，通常不需要給小費，優質服務已包含在價格中。"}
         </p>
       </div>
     </div>
@@ -838,21 +1033,99 @@ function TippingGuide({ exchangeRate }: { exchangeRate: number }) {
 
 // --- Main App ---
 
-function VietnamModule() {
+interface CountryModuleProps {
+  country: 'vietnam' | 'japan' | 'thailand' | 'korea';
+}
+
+function CountryModule({ country }: CountryModuleProps) {
   const [activeTab, setActiveTab] = useState<'converter' | 'phrases' | 'tipping' | 'explore'>('converter');
-  const [exchangeRate, setExchangeRate] = useState<number>(FALLBACK_EXCHANGE_RATE);
+  const [exchangeRate, setExchangeRate] = useState<number>(country === 'vietnam' ? FALLBACK_EXCHANGE_RATE : (country === 'japan' ? 4.5 : (country === 'thailand' ? 1.1 : 40)));
   const [lastUpdated, setLastUpdated] = useState<string>('');
   const [isLoadingRate, setIsLoadingRate] = useState<boolean>(true);
+
+  const config = {
+    vietnam: {
+      name: '越南',
+      subTitle: 'Xin chào! 你的隨身口袋導遊',
+      currencyName: 'VND',
+      currencySymbol: '₫',
+      phrases: PHRASES_VN,
+      tips: TIPS_VN,
+      regionalData: REGIONAL_DATA_VN,
+      targetLang: 'vi',
+      translatorTitle: '中翻越',
+      themeColor: 'bg-emerald-600',
+      themeColorDark: 'bg-emerald-700/50',
+      themeText: 'text-emerald-600',
+      themeLight: 'bg-emerald-50',
+      themeBorder: 'border-emerald-100',
+      rateApi: 'https://open.er-api.com/v6/latest/TWD',
+      rateKey: 'VND'
+    },
+    japan: {
+      name: '日本',
+      subTitle: 'こんにちは! 你的隨身口袋導遊',
+      currencyName: 'JPY',
+      currencySymbol: '¥',
+      phrases: PHRASES_JP,
+      tips: TIPS_JP,
+      regionalData: REGIONAL_DATA_JP,
+      targetLang: 'ja',
+      translatorTitle: '中翻日',
+      themeColor: 'bg-red-600',
+      themeColorDark: 'bg-red-700/50',
+      themeText: 'text-red-600',
+      themeLight: 'bg-red-50',
+      themeBorder: 'border-red-100',
+      rateApi: 'https://open.er-api.com/v6/latest/TWD',
+      rateKey: 'JPY'
+    },
+    thailand: {
+      name: '泰國',
+      subTitle: 'Sawasdee! 你的隨身口袋導遊',
+      currencyName: 'THB',
+      currencySymbol: '฿',
+      phrases: PHRASES_TH,
+      tips: TIPS_TH,
+      regionalData: REGIONAL_DATA_TH,
+      targetLang: 'th',
+      translatorTitle: '中翻泰',
+      themeColor: 'bg-blue-600',
+      themeColorDark: 'bg-blue-700/50',
+      themeText: 'text-blue-600',
+      themeLight: 'bg-blue-50',
+      themeBorder: 'border-blue-100',
+      rateApi: 'https://open.er-api.com/v6/latest/TWD',
+      rateKey: 'THB'
+    },
+    korea: {
+      name: '韓國',
+      subTitle: '안녕하세요! 你的隨身口袋導遊',
+      currencyName: 'KRW',
+      currencySymbol: '₩',
+      phrases: PHRASES_KR,
+      tips: TIPS_KR,
+      regionalData: REGIONAL_DATA_KR,
+      targetLang: 'ko',
+      translatorTitle: '中翻韓',
+      themeColor: 'bg-indigo-600',
+      themeColorDark: 'bg-indigo-700/50',
+      themeText: 'text-indigo-600',
+      themeLight: 'bg-indigo-50',
+      themeBorder: 'border-indigo-100',
+      rateApi: 'https://open.er-api.com/v6/latest/TWD',
+      rateKey: 'KRW'
+    }
+  }[country];
 
   useEffect(() => {
     const fetchRate = async () => {
       try {
         setIsLoadingRate(true);
-        // Using ExchangeRate-API (Free, reliable, no key needed for basic usage)
-        const res = await fetch('https://open.er-api.com/v6/latest/TWD');
+        const res = await fetch(config.rateApi);
         const data = await res.json();
-        if (data && data.rates && data.rates.VND) {
-          setExchangeRate(data.rates.VND);
+        if (data && data.rates && data.rates[config.rateKey]) {
+          setExchangeRate(data.rates[config.rateKey]);
           const now = new Date();
           setLastUpdated(`${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`);
         }
@@ -864,42 +1137,67 @@ function VietnamModule() {
     };
 
     fetchRate();
-    // Auto update every 1 hour (3600000 ms)
     const interval = setInterval(fetchRate, 3600000);
     return () => clearInterval(interval);
-  }, []);
+  }, [country, config.rateApi, config.rateKey]);
 
   return (
     <div className="flex flex-col h-full bg-[#F8FAFC]">
       {/* Header */}
-      <header className="bg-emerald-600 text-white pt-12 pb-6 px-6 rounded-b-[2rem] shadow-md z-10 shrink-0">
-        <h1 className="text-2xl font-bold tracking-tight mb-1">越南</h1>
-        <p className="text-emerald-100 text-sm font-medium">Xin chào! 你的隨身口袋導遊</p>
+      <header className={`${config.themeColor} text-white pt-4 pb-3 px-6 rounded-b-[2rem] shadow-md z-10 shrink-0`}>
+        <h1 className="text-xl font-bold tracking-tight">{config.name}</h1>
+        <p className="text-white/80 text-[10px] font-medium">{config.subTitle}</p>
         
-        <div className="flex bg-emerald-700/50 rounded-xl p-1 mt-5 overflow-x-auto hide-scrollbar">
-          <button onClick={() => setActiveTab('converter')} className={`flex-1 py-2 text-[11px] sm:text-xs font-bold rounded-lg transition-colors flex items-center justify-center gap-0.5 sm:gap-1 whitespace-nowrap ${activeTab === 'converter' ? 'bg-white text-emerald-700 shadow-sm' : 'text-emerald-100 hover:text-white'}`}><Calculator size={14} className="shrink-0"/> 換算</button>
-          <button onClick={() => setActiveTab('phrases')} className={`flex-1 py-2 text-[11px] sm:text-xs font-bold rounded-lg transition-colors flex items-center justify-center gap-0.5 sm:gap-1 whitespace-nowrap ${activeTab === 'phrases' ? 'bg-white text-emerald-700 shadow-sm' : 'text-emerald-100 hover:text-white'}`}><MessageSquare size={14} className="shrink-0"/> 越語</button>
-          <button onClick={() => setActiveTab('tipping')} className={`flex-1 py-2 text-[11px] sm:text-xs font-bold rounded-lg transition-colors flex items-center justify-center gap-0.5 sm:gap-1 whitespace-nowrap ${activeTab === 'tipping' ? 'bg-white text-emerald-700 shadow-sm' : 'text-emerald-100 hover:text-white'}`}><Wallet size={14} className="shrink-0"/> 小費</button>
-          <button onClick={() => setActiveTab('explore')} className={`flex-1 py-2 text-[11px] sm:text-xs font-bold rounded-lg transition-colors flex items-center justify-center gap-0.5 sm:gap-1 whitespace-nowrap ${activeTab === 'explore' ? 'bg-white text-emerald-700 shadow-sm' : 'text-emerald-100 hover:text-white'}`}><Compass size={14} className="shrink-0"/> 周邊</button>
+        <div className={`flex ${config.themeColorDark} rounded-xl p-1 mt-2 overflow-x-auto hide-scrollbar`}>
+          <button onClick={() => setActiveTab('converter')} className={`flex-1 py-2 text-[11px] sm:text-xs font-bold rounded-lg transition-colors flex items-center justify-center gap-0.5 sm:gap-1 whitespace-nowrap ${activeTab === 'converter' ? 'bg-white ' + config.themeText + ' shadow-sm' : 'text-white/80 hover:text-white'}`}><Calculator size={14} className="shrink-0"/> 換算</button>
+          <button onClick={() => setActiveTab('phrases')} className={`flex-1 py-2 text-[11px] sm:text-xs font-bold rounded-lg transition-colors flex items-center justify-center gap-0.5 sm:gap-1 whitespace-nowrap ${activeTab === 'phrases' ? 'bg-white ' + config.themeText + ' shadow-sm' : 'text-white/80 hover:text-white'}`}><MessageSquare size={14} className="shrink-0"/> {country === 'vietnam' ? '越語' : (country === 'japan' ? '日語' : (country === 'thailand' ? '泰語' : '韓語'))}</button>
+          <button onClick={() => setActiveTab('tipping')} className={`flex-1 py-2 text-[11px] sm:text-xs font-bold rounded-lg transition-colors flex items-center justify-center gap-0.5 sm:gap-1 whitespace-nowrap ${activeTab === 'tipping' ? 'bg-white ' + config.themeText + ' shadow-sm' : 'text-white/80 hover:text-white'}`}><Wallet size={14} className="shrink-0"/> 小費</button>
+          <button onClick={() => setActiveTab('explore')} className={`flex-1 py-2 text-[11px] sm:text-xs font-bold rounded-lg transition-colors flex items-center justify-center gap-0.5 sm:gap-1 whitespace-nowrap ${activeTab === 'explore' ? 'bg-white ' + config.themeText + ' shadow-sm' : 'text-white/80 hover:text-white'}`}><Compass size={14} className="shrink-0"/> 周邊</button>
         </div>
       </header>
 
       {/* Main Content Area */}
-      <main className="flex-1 overflow-y-auto p-6 pb-28">
+      <main className="flex-1 overflow-y-auto p-4 pb-24">
         <AnimatePresence mode="wait">
           {activeTab === 'converter' && (
             <motion.div key="converter" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} transition={{ duration: 0.2 }}>
-              <Converter exchangeRate={exchangeRate} lastUpdated={lastUpdated} isLoadingRate={isLoadingRate} />
+              <Converter 
+                exchangeRate={exchangeRate} 
+                lastUpdated={lastUpdated} 
+                isLoadingRate={isLoadingRate} 
+                regionalData={config.regionalData}
+                currencySymbol={config.currencySymbol}
+                currencyName={config.currencyName}
+                country={country}
+                themeText={config.themeText}
+                themeBg={config.themeLight}
+                themeBorder={config.themeBorder}
+              />
             </motion.div>
           )}
           {activeTab === 'phrases' && (
             <motion.div key="phrases" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} transition={{ duration: 0.2 }}>
-              <Phrasebook />
+              <Phrasebook 
+                phrases={config.phrases}
+                targetLang={config.targetLang}
+                translatorTitle={config.translatorTitle}
+                countryName={config.name}
+                themeText={config.themeText}
+                themeBg={config.themeLight}
+                themeBorder={config.themeBorder}
+              />
             </motion.div>
           )}
           {activeTab === 'tipping' && (
             <motion.div key="tipping" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} transition={{ duration: 0.2 }}>
-              <TippingGuide exchangeRate={exchangeRate} />
+              <TippingGuide 
+                tips={config.tips} 
+                exchangeRate={exchangeRate} 
+                currencyName={config.currencyName} 
+                themeText={config.themeText} 
+                themeBg={config.themeLight} 
+                country={country}
+              />
             </motion.div>
           )}
           {activeTab === 'explore' && (
@@ -913,37 +1211,43 @@ function VietnamModule() {
   );
 }
 
-function HomeModule({ onNavigate }: { onNavigate: (tab: 'vietnam') => void }) {
+function HomeModule({ onNavigate }: { onNavigate: (tab: 'vietnam' | 'japan' | 'thailand' | 'korea') => void }) {
   return (
     <div className="flex flex-col h-full bg-[#F8FAFC]">
-      <header className="bg-blue-600 text-white pt-12 pb-6 px-6 rounded-b-[2rem] shadow-md z-10 shrink-0">
-        <h1 className="text-2xl font-bold tracking-tight mb-1">旅遊助手</h1>
-        <p className="text-blue-100 text-sm font-medium">選擇你的目的地，開始旅程</p>
+      <header className="bg-blue-600 text-white pt-6 pb-4 px-6 rounded-b-[2rem] shadow-md z-10 shrink-0">
+        <h1 className="text-xl font-bold tracking-tight">旅遊助手</h1>
+        <p className="text-blue-100 text-[10px] font-medium">選擇你的目的地，開始旅程</p>
       </header>
-      <div className="flex-1 overflow-y-auto p-6 pb-28">
-        <h2 className="text-lg font-bold text-gray-900 mb-4">熱門目的地</h2>
-        <div className="grid grid-cols-2 gap-4">
+      <div className="flex-1 overflow-y-auto p-4 pb-24">
+        <h2 className="text-base font-bold text-gray-900 mb-3">熱門目的地</h2>
+        <div className="grid grid-cols-2 gap-3">
           <div 
             onClick={() => onNavigate('vietnam')}
-            className="bg-white p-6 rounded-3xl shadow-sm border border-emerald-100 flex flex-col items-center justify-center gap-3 cursor-pointer hover:border-emerald-300 hover:shadow-md transition-all active:scale-95"
+            className="bg-white p-4 rounded-3xl shadow-sm border border-emerald-100 flex flex-col items-center justify-center gap-2 cursor-pointer hover:border-emerald-300 hover:shadow-md transition-all active:scale-95"
           >
-            <span className="text-5xl">🇻🇳</span>
-            <span className="font-bold text-gray-800">越南</span>
+            <span className="text-4xl">🇻🇳</span>
+            <span className="font-bold text-sm text-gray-800">越南</span>
           </div>
-          <div className="bg-gray-50 p-6 rounded-3xl border border-gray-100 flex flex-col items-center justify-center gap-3 opacity-50">
-            <span className="text-5xl">🇯🇵</span>
-            <span className="font-bold text-gray-800">日本</span>
-            <span className="text-[10px] bg-gray-200 text-gray-500 px-2 py-0.5 rounded-full">開發中</span>
+          <div 
+            onClick={() => onNavigate('japan')}
+            className="bg-white p-4 rounded-3xl shadow-sm border border-red-100 flex flex-col items-center justify-center gap-2 cursor-pointer hover:border-red-300 hover:shadow-md transition-all active:scale-95"
+          >
+            <span className="text-4xl">🇯🇵</span>
+            <span className="font-bold text-sm text-gray-800">日本</span>
           </div>
-          <div className="bg-gray-50 p-6 rounded-3xl border border-gray-100 flex flex-col items-center justify-center gap-3 opacity-50">
-            <span className="text-5xl">🇹🇭</span>
-            <span className="font-bold text-gray-800">泰國</span>
-            <span className="text-[10px] bg-gray-200 text-gray-500 px-2 py-0.5 rounded-full">開發中</span>
+          <div 
+            onClick={() => onNavigate('thailand')}
+            className="bg-white p-4 rounded-3xl shadow-sm border border-blue-100 flex flex-col items-center justify-center gap-2 cursor-pointer hover:border-blue-300 hover:shadow-md transition-all active:scale-95"
+          >
+            <span className="text-4xl">🇹🇭</span>
+            <span className="font-bold text-sm text-gray-800">泰國</span>
           </div>
-          <div className="bg-gray-50 p-6 rounded-3xl border border-gray-100 flex flex-col items-center justify-center gap-3 opacity-50">
-            <span className="text-5xl">🇰🇷</span>
-            <span className="font-bold text-gray-800">韓國</span>
-            <span className="text-[10px] bg-gray-200 text-gray-500 px-2 py-0.5 rounded-full">開發中</span>
+          <div 
+            onClick={() => onNavigate('korea')}
+            className="bg-white p-4 rounded-3xl shadow-sm border border-indigo-100 flex flex-col items-center justify-center gap-2 cursor-pointer hover:border-indigo-300 hover:shadow-md transition-all active:scale-95"
+          >
+            <span className="text-4xl">🇰🇷</span>
+            <span className="font-bold text-sm text-gray-800">韓國</span>
           </div>
         </div>
       </div>
@@ -952,7 +1256,7 @@ function HomeModule({ onNavigate }: { onNavigate: (tab: 'vietnam') => void }) {
 }
 
 export default function App() {
-  const [mainTab, setMainTab] = useState<'home' | 'vietnam'>('home');
+  const [mainTab, setMainTab] = useState<'home' | 'vietnam' | 'japan' | 'thailand' | 'korea'>('home');
 
   return (
     <div className="h-[100dvh] w-full bg-[#F8FAFC] flex flex-col font-sans max-w-md mx-auto shadow-2xl relative overflow-hidden">
@@ -964,39 +1268,27 @@ export default function App() {
               <HomeModule onNavigate={(tab) => setMainTab(tab)} />
             </motion.div>
           )}
-          {mainTab === 'vietnam' && (
-            <motion.div key="vietnam" className="absolute inset-0" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 20 }} transition={{ duration: 0.2 }}>
-              <VietnamModule />
+          {(mainTab === 'vietnam' || mainTab === 'japan' || mainTab === 'thailand' || mainTab === 'korea') && (
+            <motion.div key={mainTab} className="absolute inset-0" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 20 }} transition={{ duration: 0.2 }}>
+              <CountryModule country={mainTab} />
             </motion.div>
           )}
         </AnimatePresence>
       </main>
 
       {/* Global Bottom Navigation */}
-      <nav className="bg-white border-t border-gray-100 pb-6 pt-2 absolute bottom-0 w-full rounded-t-3xl shadow-[0_-10px_40px_rgba(0,0,0,0.05)] z-20">
-        <div className="flex justify-around items-center px-6 py-1">
+      <nav className="bg-white border-t border-gray-100 pb-2 pt-1 absolute bottom-0 w-full rounded-t-3xl shadow-[0_-10px_40px_rgba(0,0,0,0.05)] z-20">
+        <div className="flex justify-around items-center px-6 py-0.5">
           <button
             onClick={() => setMainTab('home')}
-            className={`flex flex-col items-center justify-center w-20 h-14 rounded-2xl transition-all ${
+            className={`flex flex-col items-center justify-center w-full h-12 rounded-2xl transition-all ${
               mainTab === 'home' ? 'text-blue-600 scale-105' : 'text-gray-400 hover:text-gray-600'
             }`}
           >
-            <div className={`p-1.5 rounded-xl mb-1 ${mainTab === 'home' ? 'bg-blue-50' : ''}`}>
-              <Home size={22} strokeWidth={mainTab === 'home' ? 2.5 : 2} />
+            <div className={`p-1 rounded-xl mb-0.5 ${mainTab === 'home' ? 'bg-blue-50' : ''}`}>
+              <Home size={20} strokeWidth={mainTab === 'home' ? 2.5 : 2} />
             </div>
-            <span className="text-[10px] font-bold">首頁</span>
-          </button>
-
-          <button
-            onClick={() => setMainTab('vietnam')}
-            className={`flex flex-col items-center justify-center w-20 h-14 rounded-2xl transition-all ${
-              mainTab === 'vietnam' ? 'text-emerald-600 scale-105' : 'text-gray-400 hover:text-gray-600'
-            }`}
-          >
-            <div className={`p-1.5 rounded-xl mb-1 ${mainTab === 'vietnam' ? 'bg-emerald-50' : ''}`}>
-              <Globe size={22} strokeWidth={mainTab === 'vietnam' ? 2.5 : 2} />
-            </div>
-            <span className="text-[10px] font-bold">越南</span>
+            <span className="text-[9px] font-bold">首頁</span>
           </button>
         </div>
       </nav>
