@@ -1052,7 +1052,7 @@ function ChatModal({ isOpen, onClose }: { isOpen: boolean; onClose: () => void }
     if (isOpen && !chatRef.current) {
       const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
       chatRef.current = ai.chats.create({
-        model: "gemini-2.5-flash-preview",
+        model: "gemini-3-flash-preview",
         config: {
           systemInstruction: "你是一位專業的旅遊助手，擅長回答關於越南、日本、泰國、韓國的旅遊資訊。請用繁體中文回答，語氣親切且專業。你具備優秀的上下文記憶能力，請根據對話歷史提供連貫的回答。如果問題與旅遊無關，請禮貌地引導回旅遊話題。",
         }
