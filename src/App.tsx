@@ -1045,36 +1045,70 @@ function ChatModal({ isOpen, onClose }: { isOpen: boolean; onClose: () => void }
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const scrollRef = React.useRef<HTMLDivElement>(null);
+  const chatRef = React.useRef<any>(null);
+
+  // Initialize chat session
+  useEffect(() => {
+    if (isOpen && !chatRef.current) {
+      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+      chatRef.current = ai.chats.create({
+        model: "gemini-2.5-flash-preview",
+        config: {
+          systemInstruction: "你是一位專業的旅遊助手，擅長回答關於越南、日本、泰國、韓國的旅遊資訊。請用繁體中文回答，語氣親切且專業。你具備優秀的上下文記憶能力，請根據對話歷史提供連貫的回答。如果問題與旅遊無關，請禮貌地引導回旅遊話題。",
+        }
+      });
+    }
+  }, [isOpen]);
 
   useEffect(() => {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
-  }, [messages]);
+  }, [messages, isLoading]);
 
   const handleSend = async () => {
-    if (!input.trim() || isLoading) return;
+    if (!input.trim() || isLoading || !chatRef.current) return;
 
     const userMsg = input.trim();
     setInput('');
     setMessages(prev => [...prev, { role: 'user', text: userMsg }]);
     setIsLoading(true);
 
+    // Add an empty bot message to be filled by stream
+    setMessages(prev => [...prev, { role: 'bot', text: '' }]);
+
     try {
-      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-      const response = await ai.models.generateContent({
-        model: "gemini-2.5-flash",
-        contents: userMsg,
-        config: {
-          systemInstruction: "你是一位專業的旅遊助手，擅長回答關於越南、日本、泰國、韓國的旅遊資訊。請用繁體中文回答，語氣親切且專業。如果問題與旅遊無關，請禮貌地引導回旅遊話題。",
-        }
+      const streamResponse = await chatRef.current.sendMessageStream({
+        message: userMsg,
       });
 
-      const botText = response.text || '抱歉，我現在無法回答這個問題。';
-      setMessages(prev => [...prev, { role: 'bot', text: botText }]);
+      let fullText = '';
+      for await (const chunk of streamResponse) {
+        const chunkText = chunk.text || '';
+        
+        // To achieve a "word by word" or "character by character" feel even with large chunks,
+        // we can iterate through the chunk text with a small delay.
+        for (let i = 0; i < chunkText.length; i++) {
+          fullText += chunkText[i];
+          
+          // Update the last message (the bot's message) with the accumulated text
+          setMessages(prev => {
+            const newMessages = [...prev];
+            newMessages[newMessages.length - 1] = { role: 'bot', text: fullText };
+            return newMessages;
+          });
+          
+          // Small delay for the typewriter effect
+          await new Promise(resolve => setTimeout(resolve, 10));
+        }
+      }
     } catch (error) {
       console.error('AI Error:', error);
-      setMessages(prev => [...prev, { role: 'bot', text: '抱歉，連線發生錯誤，請稍後再試。' }]);
+      setMessages(prev => {
+        const newMessages = [...prev];
+        newMessages[newMessages.length - 1] = { role: 'bot', text: '抱歉，連線發生錯誤，請稍後再試。' };
+        return newMessages;
+      });
     } finally {
       setIsLoading(false);
     }
@@ -1113,21 +1147,24 @@ function ChatModal({ isOpen, onClose }: { isOpen: boolean; onClose: () => void }
 
             {/* Messages */}
             <div ref={scrollRef} className="flex-1 overflow-y-auto p-6 space-y-4 bg-gray-50">
-              {messages.map((msg, i) => (
-                <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                  <div className={`flex gap-2 max-w-[85%] ${msg.role === 'user' ? 'flex-row-reverse' : 'flex-row'}`}>
-                    <div className={`shrink-0 w-8 h-8 rounded-full flex items-center justify-center ${msg.role === 'user' ? 'bg-blue-100 text-blue-600' : 'bg-white text-gray-600 shadow-sm'}`}>
-                      {msg.role === 'user' ? <User size={16} /> : <Bot size={16} />}
-                    </div>
-                    <div className={`p-4 rounded-2xl text-sm leading-relaxed ${msg.role === 'user' ? 'bg-blue-600 text-white rounded-tr-none' : 'bg-white text-gray-700 shadow-sm rounded-tl-none'}`}>
-                      <div className="markdown-body">
-                        <ReactMarkdown>{msg.text}</ReactMarkdown>
+              {messages.map((msg, i) => {
+                if (msg.role === 'bot' && !msg.text) return null;
+                return (
+                  <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                    <div className={`flex gap-2 max-w-[85%] ${msg.role === 'user' ? 'flex-row-reverse' : 'flex-row'}`}>
+                      <div className={`shrink-0 w-8 h-8 rounded-full flex items-center justify-center ${msg.role === 'user' ? 'bg-blue-100 text-blue-600' : 'bg-white text-gray-600 shadow-sm'}`}>
+                        {msg.role === 'user' ? <User size={16} /> : <Bot size={16} />}
+                      </div>
+                      <div className={`p-4 rounded-2xl text-sm leading-relaxed ${msg.role === 'user' ? 'bg-blue-600 text-white rounded-tr-none' : 'bg-white text-gray-700 shadow-sm rounded-tl-none'}`}>
+                        <div className="markdown-body">
+                          <ReactMarkdown>{msg.text}</ReactMarkdown>
+                        </div>
                       </div>
                     </div>
                   </div>
-                </div>
-              ))}
-              {isLoading && (
+                );
+              })}
+              {isLoading && (!messages[messages.length - 1]?.text) && (
                 <div className="flex justify-start">
                   <div className="flex gap-2 items-center bg-white p-4 rounded-2xl shadow-sm rounded-tl-none">
                     <div className="flex gap-1">
