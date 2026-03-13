@@ -1384,6 +1384,25 @@ function CountryModule({ country }: CountryModuleProps) {
   );
 }
 
+// --- Ad Banner Component ---
+
+function AdBanner() {
+  useEffect(() => {
+    const script = document.createElement('script');
+    script.src = "https://pl28906975.effectivegatecpm.com/674b2151a813fdc894d3b62e8fe858bb/invoke.js";
+    script.async = true;
+    script.setAttribute('data-cfasync', 'false');
+    document.body.appendChild(script);
+  }, []);
+
+  return (
+    <div className="mt-8 mb-4 flex flex-col items-center">
+      <p className="text-[10px] text-gray-400 mb-2 uppercase tracking-widest">贊助內容</p>
+      <div id="container-674b2151a813fdc894d3b62e8fe858bb" className="w-full flex justify-center min-h-[50px]"></div>
+    </div>
+  );
+}
+
 function HomeModule({ onNavigate }: { onNavigate: (tab: 'vietnam' | 'japan' | 'thailand' | 'korea') => void }) {
   return (
     <div className="flex flex-col h-full bg-[#F8FAFC]">
@@ -1423,6 +1442,7 @@ function HomeModule({ onNavigate }: { onNavigate: (tab: 'vietnam' | 'japan' | 't
             <span className="font-bold text-sm text-gray-800">韓國</span>
           </div>
         </div>
+        <AdBanner />
       </div>
     </div>
   );
